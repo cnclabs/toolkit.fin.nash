@@ -886,20 +886,30 @@ function TraceVisualizationPanel({ traces, title }: { traces: NashTrace[]; title
   const columns = sentence2Numbers.map((number) => number.text);
   const rows = sentence1Numbers.map((number) => number.text);
   const matrix = trace.numeric_alignment.similarity_matrix;
+  const tau = trace.numeric_alignment.threshold;
+  const textMass = trace.aggregation.idf_text_mass;
+  const numericMass = trace.aggregation.idf_numeric_mass;
+  const alpha = textMass / Math.max(textMass + numericMass, 1e-12);
+  const numericWeight = 1 - alpha;
+  const forward = trace.numeric_alignment.alignments_s1_to_s2;
+  const reverse = trace.numeric_alignment.alignments_s2_to_s1;
+  const acceptedCount = [...forward, ...reverse].filter((alignment) => alignment.valid).length;
+  const rejectedCount = [...forward, ...reverse].filter((alignment) => !alignment.valid).length;
   const forwardCells = new Set(
     trace.numeric_alignment.valid_alignments_s1_to_s2
       .filter((alignment) => alignment.valid)
       .map((alignment) => `${alignment.source_index}-${alignment.target_index}`)
   );
+  const forwardArgmax = new Map(trace.numeric_alignment.alignments_s1_to_s2.map((alignment) => [`${alignment.source_index}-${alignment.target_index}`, alignment]));
 
   return (
     <Panel title={title} icon={<Table2 size={16} />}>
-      <div className="mb-3 grid gap-3 lg:grid-cols-[1fr_260px]">
+      <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_320px]">
         <div className="grid gap-2 md:grid-cols-2">
           <ReadOnlySentence label="Sentence A" value={trace.input.sentence1} />
           <ReadOnlySentence label="Sentence B" value={trace.input.sentence2} />
         </div>
-        <div className="grid gap-2">
+        <div className="rounded-lg border-2 border-slate-900 bg-slate-950 p-3 text-white shadow-panel">
           {traces.length > 1 && (
             <label className="grid gap-1 text-xs font-medium text-slate-600">
               Trace
@@ -911,37 +921,55 @@ function TraceVisualizationPanel({ traces, title }: { traces: NashTrace[]; title
               </select>
             </label>
           )}
-          <MiniMetric label="baseline" value={formatScore(trace.baseline_comparison.baseline_score)} />
-          <MiniMetric label="NASH" value={formatScore(trace.baseline_comparison.nash_score)} />
-          <MiniMetric label="Numeric" value={formatScore(trace.numeric_similarity.score)} />
+          <div className="mb-2 text-xs font-bold uppercase tracking-wider text-teal-300">Final score audit</div>
+          <div className="grid grid-cols-2 gap-2">
+            <AuditMetric label="Baseline score" value={trace.baseline_comparison.baseline_score} />
+            <AuditMetric label="Masked-text score" value={trace.textual_similarity.score} />
+            <AuditMetric label="Final numeric score" value={trace.numeric_similarity.score} accent />
+            <AuditMetric label="Final NASH score" value={trace.aggregation.final_score} accent />
+          </div>
         </div>
       </div>
 
-      <div className="mb-3 grid gap-2 md:grid-cols-2">
-        <TraceNumberList title="Sentence A numbers" numbers={sentence1Numbers} />
-        <TraceNumberList title="Sentence B numbers" numbers={sentence2Numbers} />
+      <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div><span className="text-sm font-bold text-teal-950">Numerical alignment</span><span className="ml-2 text-xs text-teal-800">Contextual cosine matrix · directional argmax · τ gating</span></div>
+          <div className="rounded-full bg-teal-700 px-3 py-1 font-mono text-xs font-bold text-white">Active τ = {formatScore(tau)}</div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs"><LegendChip tone="accepted" label={`Accepted ${acceptedCount}`} /><LegendChip tone="rejected" label={`Rejected by τ ${rejectedCount}`} /><LegendChip tone="neutral" label="Cells = contextual cosine similarity" /></div>
       </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <TraceNumberList title="Extracted Numbers — Sentence A" numbers={sentence1Numbers} />
+        <TraceNumberList title="Extracted Numbers — Sentence B" numbers={sentence2Numbers} />
+      </div>
+
+      <div className="mb-2 flex items-end justify-between gap-3"><div><h3 className="text-sm font-bold text-slate-950">Alignment Matrix: Sentence A → Sentence B</h3><p className="text-xs text-slate-600">Rows are extracted numbers from Sentence A. Columns are extracted numbers from Sentence B. Selected argmax cells are outlined; red cells are selected then rejected by τ.</p></div><span className="whitespace-nowrap text-xs font-semibold text-slate-600">τ = {formatScore(tau)}</span></div>
 
       {rows.length && columns.length ? (
         <div className="overflow-x-auto">
           <div className="grid min-w-max gap-1" style={{ gridTemplateColumns: `112px repeat(${Math.max(1, columns.length)}, minmax(92px, 1fr))` }}>
-            <div />
-            {columns.map((column, index) => <div key={`${column}-${index}`} className="rounded bg-slate-100 px-2 py-2 text-center font-mono text-xs font-semibold">{column}</div>)}
+            <div className="rounded bg-slate-900 px-2 py-2 text-center text-[10px] font-bold uppercase text-white">A ↓ / B →</div>
+            {columns.map((column, index) => <div key={`${column}-${index}`} className="rounded bg-slate-900 px-2 py-2 text-center font-mono text-xs font-semibold text-white"><div className="text-[10px] font-sans uppercase text-slate-300">B{index + 1}</div>{column}</div>)}
             {rows.map((row, rowIndex) => (
               <div key={`${row}-${rowIndex}`} className="contents">
-                <div className="rounded bg-slate-100 px-2 py-2 font-mono text-xs font-semibold">{row}</div>
+                <div className="rounded bg-slate-900 px-2 py-2 font-mono text-xs font-semibold text-white"><span className="mr-1 font-sans text-[10px] text-slate-300">A{rowIndex + 1}</span>{row}</div>
                 {columns.map((column, colIndex) => {
                   const value = matrix[rowIndex]?.[colIndex] ?? 0;
                   const key = `${rowIndex}-${colIndex}`;
                   const aligned = forwardCells.has(key);
+                  const selection = forwardArgmax.get(key);
+                  const cellTitle = `${rows[rowIndex]} → ${columns[colIndex]}\ncontextual cosine: ${formatScore(value)}\ndirectional argmax: ${selection ? "yes" : "no"}\npasses τ: ${selection?.valid ? "yes" : "no"}${selection ? `\nmagnitude similarity: ${selection.valid ? formatScore(selection.magnitude_similarity) : "does not contribute"}` : ""}`;
                   return (
                     <div
                       key={`${row}-${column}-${colIndex}`}
-                      className={`rounded border px-2 py-2 text-center font-mono text-xs font-semibold ${aligned ? "border-teal-700 ring-2 ring-teal-400" : "border-slate-200"}`}
+                      className={`rounded border px-2 py-2 text-center font-mono text-xs font-semibold ${aligned ? "border-teal-800 ring-2 ring-teal-500" : selection ? "border-rose-700 ring-2 ring-rose-300" : "border-slate-200"}`}
                       style={{ backgroundColor: heatColor(value) }}
+                      title={cellTitle}
                     >
                       <div>{formatScore(value)}</div>
-                      {aligned && <div className="mt-1 text-[10px] uppercase text-teal-950">aligned</div>}
+                      {aligned && <div className="mt-1 text-[10px] uppercase text-teal-950">A→B accepted</div>}
+                      {selection && !selection.valid && <div className="mt-1 text-[10px] uppercase text-rose-950">A→B rejected</div>}
                     </div>
                   );
                 })}
@@ -952,8 +980,37 @@ function TraceVisualizationPanel({ traces, title }: { traces: NashTrace[]; title
       ) : (
         <Notice tone="info">No numeric mentions were available for an alignment matrix.</Notice>
       )}
+      <AlignmentDetails trace={trace} />
+      <div className="mt-4 rounded-lg border-2 border-indigo-200 bg-indigo-50 p-4">
+        <div className="mb-3 text-sm font-bold text-indigo-950">Final NASH score decomposition</div>
+        <div className="grid gap-2 sm:grid-cols-3"><AuditTile label="A → B numeric score" value={trace.numeric_similarity.directional_s1_to_s2} /><AuditTile label="B → A numeric score" value={trace.numeric_similarity.directional_s2_to_s1} /><AuditTile label="Bidirectional numeric score" value={trace.numeric_similarity.score} /></div>
+        <div className="my-3 grid gap-2 sm:grid-cols-2"><AuditTile label="α (text weight)" value={alpha} /><AuditTile label="1 − α (numeric weight)" value={numericWeight} /></div>
+        <div className="rounded-md bg-indigo-950 p-3 font-mono text-xs leading-6 text-indigo-50">NASH = α × text_score + (1 − α) × numeric_score<br />= {formatScore(alpha)} × {formatScore(trace.textual_similarity.score)} + {formatScore(numericWeight)} × {formatScore(trace.numeric_similarity.score)}<br />= <strong className="text-teal-300">{formatScore(trace.aggregation.final_score)}</strong></div>
+      </div>
     </Panel>
   );
+}
+
+function AlignmentDetails({ trace }: { trace: NashTrace }) {
+  const directions = [["A → B", trace.numeric_alignment.alignments_s1_to_s2], ["B → A", trace.numeric_alignment.alignments_s2_to_s1]] as const;
+  return <div className="mt-5 overflow-x-auto rounded-lg border border-slate-300 bg-white"><div className="border-b border-slate-200 bg-slate-100 px-4 py-3"><div className="text-sm font-bold text-slate-950">Selected Alignment Details</div><div className="text-xs text-slate-600">One directional argmax row per source mention. Rejected rows remain visible and contribute zero.</div></div><table className="min-w-full text-sm"><thead className="bg-slate-900 text-left text-xs uppercase tracking-wide text-white"><tr><th className="px-3 py-2">Direction</th><th className="px-3 py-2">Source number</th><th className="px-3 py-2">Matched target number</th><th className="px-3 py-2">Contextual similarity</th><th className="px-3 py-2">Status at τ={formatScore(trace.numeric_alignment.threshold)}</th><th className="px-3 py-2">Magnitude score</th></tr></thead><tbody>{directions.flatMap(([direction, items]) => items.map((item, index) => <tr key={`${direction}-${index}`} className="border-b border-slate-200 last:border-0"><td className="px-3 py-3 font-semibold">{direction}</td><td className="px-3 py-3 font-mono">{item.source_text}</td><td className="px-3 py-3 font-mono">{item.target_text}</td><td className="px-3 py-3 font-mono">{formatScore(item.contextual_similarity)}</td><td className="px-3 py-3"><StatusBadge accepted={item.valid} /></td><td className="px-3 py-3 font-mono font-bold">{item.valid ? formatScore(item.magnitude_similarity) : "0.000 (rejected)"}</td></tr>))}</tbody></table></div>;
+}
+
+function AuditMetric({ label, value, accent = false }: { label: string; value: number; accent?: boolean }) {
+  return <div className={`rounded border p-2 ${accent ? "border-teal-400 bg-teal-500/15" : "border-slate-700 bg-slate-800"}`}><div className="text-[10px] font-bold uppercase tracking-wide text-slate-300">{label}</div><div className={`mt-1 font-mono text-lg font-bold ${accent ? "text-teal-300" : "text-white"}`}>{formatScore(value)}</div></div>;
+}
+
+function AuditTile({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-md border border-indigo-200 bg-white px-3 py-2"><div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">{label}</div><div className="mt-1 font-mono text-base font-bold text-indigo-950">{formatScore(value)}</div></div>;
+}
+
+function LegendChip({ tone, label }: { tone: "accepted" | "rejected" | "neutral"; label: string }) {
+  const colors = { accepted: "bg-teal-100 text-teal-900 ring-teal-300", rejected: "bg-rose-100 text-rose-900 ring-rose-300", neutral: "bg-white text-slate-700 ring-slate-300" }[tone];
+  return <span className={`rounded-full px-2 py-1 text-xs font-semibold ring-1 ${colors}`}>{label}</span>;
+}
+
+function StatusBadge({ accepted }: { accepted: boolean }) {
+  return accepted ? <span className="rounded-full bg-teal-100 px-2 py-1 text-xs font-bold text-teal-900">Accepted · contributes</span> : <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-900">Rejected by τ · contributes 0</span>;
 }
 
 function EvaluationResultVisualizationPanel({ rows, task }: { rows: BatchResultRow[]; task: string }) {
@@ -1417,7 +1474,9 @@ function TraceNumberList({ title, numbers }: { title: string; numbers: NashTrace
       <div className="grid gap-1">
         {numbers.length ? numbers.map((number, index) => (
           <div key={`${number.text}-${number.start}-${index}`} className="rounded bg-white px-2 py-1 text-xs">
-            <span className="font-mono font-semibold">{number.text}</span>
+            <span className="font-mono font-semibold">{number.raw ?? number.text}</span>
+            <span className="ml-2 text-slate-600">value {formatScore(number.normalized_value ?? number.value)} · [{number.start}, {number.end})</span>
+            {number.unit && <span className="ml-2 text-slate-500">{number.unit}</span>}
           </div>
         )) : <span className="text-xs text-slate-500">No numeric mentions</span>}
       </div>

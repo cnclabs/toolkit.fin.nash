@@ -16,12 +16,25 @@ class NumericMention:
     subcategory: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
+            # ``text``/``value`` are retained for existing consumers.  The
+            # explicit names make exported traces easier to inspect.
             "text": self.text,
             "value": self.value,
+            "raw": self.text,
+            "normalized_value": self.value,
             "start": self.start,
             "end": self.end,
         }
+        if self.unit is not None:
+            result["unit"] = self.unit
+        if self.suffix is not None:
+            result["suffix"] = self.suffix
+        if self.category is not None:
+            result["category"] = self.category
+        if self.subcategory is not None:
+            result["subcategory"] = self.subcategory
+        return result
 
 
 @dataclass(frozen=True)

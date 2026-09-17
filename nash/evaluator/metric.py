@@ -93,7 +93,10 @@ class NASH:
             result.masked_sentence2,
             self.idf,
         )
+        accepted = sum(item.valid for item in result.alignments_s1_to_s2) + sum(item.valid for item in result.alignments_s2_to_s1)
+        rejected = len(result.alignments_s1_to_s2) + len(result.alignments_s2_to_s1) - accepted
         return {
+            "schema_version": "1.1",
             "input": {
                 "sentence1": sentence1,
                 "sentence2": sentence2,
@@ -125,6 +128,7 @@ class NASH:
                 "backend": self.backend.name,
             },
             "numeric_alignment": {
+                "method": "directional_argmax_threshold_gating",
                 "threshold": self.threshold,
                 "similarity_matrix": result.alignment_matrix,
                 "alignments_s1_to_s2": [
@@ -159,6 +163,15 @@ class NASH:
                 "idf_text_mass": text_mass,
                 "idf_numeric_mass": numeric_mass,
                 "final_score": result.final_score,
+                "identity": "final_score = alpha * text_score + (1 - alpha) * numeric_score",
+                "numeric_weight": 1.0 - result.alpha,
+            },
+            "diagnostics": {
+                "detected_mentions_sentence1": len(result.numbers_sentence1),
+                "detected_mentions_sentence2": len(result.numbers_sentence2),
+                "accepted_directional_alignments": accepted,
+                "rejected_by_threshold": rejected,
+                "summary": _diagnostic_summary(result, self.threshold),
             },
             "baseline_comparison": {
                 "baseline_score": result.baseline_score,
@@ -166,6 +179,7 @@ class NASH:
                 "delta": result.final_score - (result.baseline_score or 0.0),
             },
         }
+
 
     def _resolve_threshold(self, threshold: float | str | None) -> float:
         if threshold is None:
@@ -206,6 +220,22 @@ class NASH:
         with open(idf_path, "r", encoding="utf-8") as file:
             loaded = json.load(file)
         return {str(key): float(value) for key, value in loaded.items()}
+
+
+def _diagnostic_summary(result: ScoreResult, threshold: float) -> list[str]:
+    """Trace-based observations, not assertions about semantic correctness."""
+    messages: list[str] = []
+    for direction, alignments in (("Sentence A → B", result.alignments_s1_to_s2), ("Sentence B → A", result.alignments_s2_to_s1)):
+        for item in alignments:
+            if not item.valid:
+                messages.append(f"{direction}: {item.source_text!r} selected {item.target_text!r}, but contextual similarity {item.contextual_similarity:.4f} is below tau={threshold:.4f}; it contributes 0.")
+    if not result.numbers_sentence1 or not result.numbers_sentence2:
+        messages.append("Only one side (or neither side) contains detected numbers; the numeric channel follows NASH's documented edge-case score.")
+    if result.numeric_score < result.text_score - 0.25:
+        messages.append("The numeric channel is substantially lower than masked-text similarity; inspect accepted magnitude similarities and rejected matches.")
+    if abs(result.alpha - 0.5) > 0.25:
+        messages.append(f"IDF mass makes aggregation text-weighted at alpha={result.alpha:.3f}.")
+    return messages or ["All directional argmax alignments passed tau; inspect magnitude similarities and IDF weighting for the score decomposition."]
 
 
 def _basic_tokens(sentence: str) -> list[str]:
