@@ -42,22 +42,18 @@ def _directional_alignments(
     if not target_mentions:
         return alignments
 
-    candidates: list[tuple[float, int, int]] = []
-    for source_index in range(len(source_mentions)):
+    # NASH specifies a directional argmax for every source mention.  Do not
+    # turn this into bipartite/global matching: several source mentions may
+    # select the same target and unmatched sources remain in the denominator.
+    for source_index, source_mention in enumerate(source_mentions):
         row = similarity_matrix[source_index] if source_index < len(similarity_matrix) else []
-        for target_index in range(min(len(row), len(target_mentions))):
-            contextual_similarity = float(row[target_index])
-            if contextual_similarity >= threshold:
-                candidates.append((contextual_similarity, source_index, target_index))
-
-    used_sources: set[int] = set()
-    used_targets: set[int] = set()
-    for contextual_similarity, source_index, target_index in sorted(candidates, key=lambda item: (-item[0], item[1], item[2])):
-        if source_index in used_sources or target_index in used_targets:
+        if not row:
             continue
-        source_mention = source_mentions[source_index]
+        target_index = max(range(min(len(row), len(target_mentions))), key=lambda index: row[index])
+        contextual_similarity = float(row[target_index])
         target_mention = target_mentions[target_index]
-        mag_sim = magnitude_similarity(source_mention.value, target_mention.value)
+        accepted = contextual_similarity >= threshold
+        mag_sim = magnitude_similarity(source_mention.value, target_mention.value) if accepted else 0.0
         alignments.append(
             NumericAlignment(
                 source_index=source_index,
@@ -66,11 +62,9 @@ def _directional_alignments(
                 target_text=target_mention.text,
                 contextual_similarity=contextual_similarity,
                 magnitude_similarity=mag_sim,
-                valid=True,
+                valid=accepted,
             )
         )
-        used_sources.add(source_index)
-        used_targets.add(target_index)
     return alignments
 
 

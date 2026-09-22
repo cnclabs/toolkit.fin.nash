@@ -8,14 +8,14 @@ from .types import NumericMention
 _NUMERIC_TOKEN_RE = re.compile(
     r"""
     (?:
-        (?P<lead>\.)\d+(?:\.\d+)?
+        (?P<currency>[$€£¥])?(?P<lead>\.)\d+(?:\.\d+)?
         (?:st|nd|rd|th)?
         (?:%|bp|bps|k|K|m|M|b|B)?
-        \b
+        (?!\w)
     )
     |
     (?:
-        [+-]?
+        (?P<currency2>[$€£¥])?[+-]?
         (?:
             \d{1,3}(?:,\d{3})+(?:\.\d+)?
             |
@@ -23,7 +23,7 @@ _NUMERIC_TOKEN_RE = re.compile(
         )
         (?:st|nd|rd|th)?
         (?:%|bp|bps|k|K|m|M|b|B)?
-        \b
+        (?!\w)
     )
     """,
     flags=re.VERBOSE,
@@ -49,6 +49,11 @@ def extract_numeric_mentions(sentence: str) -> list[NumericMention]:
 
     for match in _NUMERIC_TOKEN_RE.finditer(sentence):
         token = match.group(0)
+        # A compact suffix is unambiguous; normalise it rather than merely
+        # stripping it.  Long written units are deliberately not consumed:
+        # e.g. "1.5 million" remains 1.5, with no claim that it is 1.5M.
+        suffix_match = re.search(r"(%|bps?|[kKmMbB])$", token)
+        suffix = suffix_match.group(1) if suffix_match else None
         cleaned = _clean_numeric_string(token)
         cleaned = re.sub(r"[^\d\.\-\+]", "", cleaned)
         if cleaned.count(".") > 1:
@@ -61,12 +66,15 @@ def extract_numeric_mentions(sentence: str) -> list[NumericMention]:
             continue
 
         start, end = match.span()
+        multiplier = {"k": 1_000.0, "m": 1_000_000.0, "b": 1_000_000_000.0}.get((suffix or "").lower(), 1.0)
         mentions.append(
             NumericMention(
                 text=token,
-                value=value,
+                value=value * multiplier,
                 start=start,
                 end=end,
+                unit="percent" if suffix == "%" else ("basis_points" if suffix and suffix.lower() in {"bp", "bps"} else None),
+                suffix=suffix,
             )
         )
 

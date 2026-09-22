@@ -1,8 +1,12 @@
 export type NumericMention = {
   text: string;
   value: number;
+  raw?: string;
+  normalized_value?: number;
   start: number;
   end: number;
+  unit?: string;
+  suffix?: string;
 };
 
 export type NumericAlignment = {

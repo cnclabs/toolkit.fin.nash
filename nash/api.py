@@ -170,6 +170,9 @@ def _pair_result_from_trace(trace: dict[str, Any], model: str, backend: str) -> 
     comparison = trace.get("baseline_comparison", {})
     extraction = trace.get("numeric_extraction", {})
     alignment = trace.get("numeric_alignment", {})
+    aggregation = trace.get("aggregation", {})
+    text_mass = float(aggregation.get("idf_text_mass", 0.0))
+    numeric_mass = float(aggregation.get("idf_numeric_mass", 0.0))
     return {
         "sentence1": input_data.get("sentence1", ""),
         "sentence2": input_data.get("sentence2", ""),
@@ -180,6 +183,9 @@ def _pair_result_from_trace(trace: dict[str, Any], model: str, backend: str) -> 
         "nash_score": float(comparison.get("nash_score", 0.0)),
         "text_score": float(textual.get("score", 0.0)),
         "numeric_score": float(numeric.get("score", 0.0)),
+        "alpha": text_mass / max(text_mass + numeric_mass, 1e-12),
+        "numeric_score_s1_to_s2": float(numeric.get("directional_s1_to_s2", 0.0)),
+        "numeric_score_s2_to_s1": float(numeric.get("directional_s2_to_s1", 0.0)),
         "masked_sentence1": masking.get("masked_sentence1", ""),
         "masked_sentence2": masking.get("masked_sentence2", ""),
         "numbers_sentence1": extraction.get("sentence1_numbers", []),
@@ -187,7 +193,11 @@ def _pair_result_from_trace(trace: dict[str, Any], model: str, backend: str) -> 
         "alignment": {
             "matrix": alignment.get("similarity_matrix", []),
             "selected_alignment_edges": _selected_edges(alignment.get("valid_alignments_s1_to_s2", [])),
+            "alignments_s1_to_s2": alignment.get("alignments_s1_to_s2", []),
+            "alignments_s2_to_s1": alignment.get("alignments_s2_to_s1", []),
+            "threshold": alignment.get("threshold"),
         },
+        "diagnostics": trace.get("diagnostics", {}),
     }
 
 
